@@ -38,10 +38,10 @@ export default function Home() {
         throw new Error(err.error ?? "업로드 실패");
       }
 
-      const { call_id } = await res.json();
+      const { job_id } = await res.json();
       setStatus("processing");
       setProgress("GPU 분석 중...");
-      pollStatus(call_id);
+      pollStatus(job_id);
     } catch (e: any) {
       setStatus("error");
       setErrorMsg(e.message ?? "업로드 실패");
