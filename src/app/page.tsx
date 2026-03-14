@@ -14,23 +14,36 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   function startPolling(job_id: string) {
+    const startTime = Date.now();
+    // 경과 시간 카운터
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/status/${job_id}`);
         const data = await res.json();
         if (data.status === "done") {
           clearInterval(interval);
+          clearInterval(timer);
           setVideoUrl(`${API_BASE}/video/${data.filename}`);
           setStatus("done");
         } else if (data.status === "error") {
           clearInterval(interval);
+          clearInterval(timer);
           setStatus("error");
           setErrorMsg(data.message ?? "처리 중 오류 발생");
+        } else if (data.progress !== undefined) {
+          setProgress(data.progress);
         }
       } catch {
         clearInterval(interval);
+        clearInterval(timer);
         setStatus("error");
         setErrorMsg("상태 확인 실패");
       }
@@ -140,16 +153,45 @@ export default function Home() {
 
       <div className="mt-8 w-full max-w-2xl">
         {isLoading && (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center">
-            <div className="flex justify-center mb-4">
-              <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
+            <div className="flex items-center gap-4 mb-5">
+              <div className="w-10 h-10 border-4 border-green-500 border-t-transparent rounded-full animate-spin shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {status === "uploading" ? "영상 불러오는 중..." : "GPU 분석 중..."}
+                </p>
+                <p className="text-gray-400 text-sm mt-0.5">
+                  {status === "uploading"
+                    ? "서버로 전송 중"
+                    : elapsed < 30
+                      ? `GPU 서버 시작 중... (${elapsed}초)`
+                      : `YOLOv8 처리 중... (${elapsed}초 경과)`}
+                </p>
+              </div>
+              <span className="ml-auto text-green-400 font-bold text-lg">
+                {status === "processing" ? `${progress}%` : ""}
+              </span>
             </div>
-            <p className="text-lg font-semibold mb-2">
-              {status === "uploading" ? "영상 불러오는 중..." : "GPU 분석 중..."}
-            </p>
-            <p className="text-gray-400 text-sm">
-              {status === "uploading" ? "잠시만 기다려주세요" : "YOLOv8으로 분석 중입니다. 1~5분 소요됩니다."}
-            </p>
+
+            {status === "processing" && (
+              <>
+                {/* 진행률 바 */}
+                <div className="w-full bg-gray-800 rounded-full h-3 mb-3">
+                  <div
+                    className="bg-green-500 h-3 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.max(progress, elapsed < 30 ? 0 : 2)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>
+                    {progress === 0
+                      ? elapsed < 30 ? "GPU 워밍업 중..." : "분석 시작 중..."
+                      : `${progress}% 완료`}
+                  </span>
+                  <span>감지 → 추적 → 렌더링</span>
+                </div>
+              </>
+            )}
           </div>
         )}
 
