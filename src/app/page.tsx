@@ -1,36 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-type Status = "idle" | "processing" | "done" | "error";
+type Status = "idle" | "uploading" | "processing" | "done" | "error";
 
 export default function Home() {
-  const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [videoUrl, setVideoUrl] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [progress, setProgress] = useState("");
+  const [dragging, setDragging] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!url.trim()) return;
-    setStatus("processing");
+  const handleFile = useCallback(async (file: File) => {
+    if (!file.type.startsWith("video/")) {
+      setStatus("error");
+      setErrorMsg("영상 파일만 업로드 가능합니다 (mp4, mov 등)");
+      return;
+    }
+    setStatus("uploading");
     setVideoUrl("");
     setErrorMsg("");
+    setProgress("업로드 중...");
+
     try {
+      const formData = new FormData();
+      formData.append("file", file);
+
       const res = await fetch(`${API_BASE}/process`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: formData,
       });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "업로드 실패");
+      }
+
       const { call_id } = await res.json();
+      setStatus("processing");
+      setProgress("GPU 분석 중...");
       pollStatus(call_id);
-    } catch {
+    } catch (e: any) {
       setStatus("error");
-      setErrorMsg("서버 연결 실패. 잠시 후 다시 시도해주세요.");
+      setErrorMsg(e.message ?? "업로드 실패");
     }
-  }
+  }, []);
 
   function pollStatus(call_id: string) {
     const interval = setInterval(async () => {
@@ -49,52 +65,70 @@ export default function Home() {
       } catch {
         clearInterval(interval);
         setStatus("error");
-        setErrorMsg("상태 확인 실패.");
+        setErrorMsg("상태 확인 실패");
       }
     }, 3000);
   }
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  const isLoading = status === "uploading" || status === "processing";
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex flex-col items-center px-4 py-16">
       <div className="mb-12 text-center">
         <h1 className="text-4xl font-bold mb-3">⚽ Soccer Highlight Analyzer</h1>
         <p className="text-gray-400 text-lg">
-          YouTube 하이라이트 링크를 넣으면 선수 추적 + 공 궤적을 자동으로 시각화합니다
+          축구 하이라이트 영상을 업로드하면 선수 추적 + 공 궤적을 자동으로 시각화합니다
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="w-full max-w-2xl flex gap-3">
-        <input
-          type="url"
-          placeholder="https://www.youtube.com/watch?v=..."
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          disabled={status === "processing"}
-          className="flex-1 rounded-xl bg-gray-800 border border-gray-700 px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={status === "processing" || !url.trim()}
-          className="bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl px-6 py-3 font-semibold transition-colors"
+      {/* 업로드 영역 */}
+      {!isLoading && status !== "done" && (
+        <label
+          className={`w-full max-w-2xl border-2 border-dashed rounded-2xl p-16 text-center cursor-pointer transition-colors
+            ${dragging ? "border-green-400 bg-green-950" : "border-gray-700 hover:border-gray-500 bg-gray-900"}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
         >
-          분석
-        </button>
-      </form>
+          <input
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+          />
+          <div className="text-5xl mb-4">🎬</div>
+          <p className="text-lg font-semibold mb-2">영상 파일을 드래그하거나 클릭해서 업로드</p>
+          <p className="text-gray-500 text-sm">mp4, mov, avi · 최대 500MB</p>
+        </label>
+      )}
 
-      <div className="mt-10 w-full max-w-2xl">
-        {status === "processing" && (
+      <div className="mt-8 w-full max-w-2xl">
+        {isLoading && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 text-center">
             <div className="flex justify-center mb-4">
               <div className="w-12 h-12 border-4 border-green-500 border-t-transparent rounded-full animate-spin" />
             </div>
-            <p className="text-lg font-semibold mb-2">영상 분석 중...</p>
-            <p className="text-gray-400 text-sm">GPU에서 처리 중입니다. 1~5분 소요됩니다.</p>
-            <div className="mt-4 flex justify-center gap-2 text-xs text-gray-600">
-              <span>다운로드</span><span>→</span><span>감지</span><span>→</span>
-              <span>추적</span><span>→</span><span>렌더링</span>
-            </div>
+            <p className="text-lg font-semibold mb-2">{progress}</p>
+            <p className="text-gray-400 text-sm">
+              {status === "uploading"
+                ? "서버로 영상을 전송하고 있습니다..."
+                : "GPU에서 YOLOv8으로 분석 중입니다. 1~5분 소요됩니다."}
+            </p>
+            {status === "processing" && (
+              <div className="mt-4 flex justify-center gap-2 text-xs text-gray-600">
+                <span>감지</span><span>→</span><span>추적</span><span>→</span><span>렌더링</span>
+              </div>
+            )}
           </div>
         )}
+
         {status === "error" && (
           <div className="bg-red-950 border border-red-800 rounded-2xl p-6 text-center">
             <p className="text-red-400 mb-4">{errorMsg}</p>
@@ -104,15 +138,22 @@ export default function Home() {
             </button>
           </div>
         )}
+
         {status === "done" && videoUrl && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
             <video src={videoUrl} controls autoPlay className="w-full" />
             <div className="p-4 flex justify-between items-center">
               <span className="text-green-400 font-semibold">✅ 분석 완료!</span>
-              <a href={videoUrl} download
-                className="bg-gray-800 hover:bg-gray-700 rounded-lg px-4 py-2 text-sm transition-colors">
-                다운로드
-              </a>
+              <div className="flex gap-3">
+                <button onClick={() => setStatus("idle")}
+                  className="bg-gray-700 hover:bg-gray-600 rounded-lg px-4 py-2 text-sm transition-colors">
+                  새 영상 분석
+                </button>
+                <a href={videoUrl} download
+                  className="bg-green-700 hover:bg-green-600 rounded-lg px-4 py-2 text-sm transition-colors">
+                  다운로드
+                </a>
+              </div>
             </div>
           </div>
         )}
