@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -17,9 +17,21 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [elapsed, setElapsed] = useState(0);
 
-  function startPolling(job_id: string) {
-    const startTime = Date.now();
-    // 경과 시간 카운터
+  // 페이지 로드 시 진행 중인 작업 복원
+  useEffect(() => {
+    const saved = localStorage.getItem("soccer_job");
+    if (saved) {
+      const { job_id, startTime } = JSON.parse(saved);
+      setStatus("processing");
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+      startPolling(job_id, startTime);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startPolling(job_id: string, startTime = Date.now()) {
+    localStorage.setItem("soccer_job", JSON.stringify({ job_id, startTime }));
+
     const timer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
@@ -31,11 +43,13 @@ export default function Home() {
         if (data.status === "done") {
           clearInterval(interval);
           clearInterval(timer);
+          localStorage.removeItem("soccer_job");
           setVideoUrl(`${API_BASE}/video/${data.filename}`);
           setStatus("done");
         } else if (data.status === "error") {
           clearInterval(interval);
           clearInterval(timer);
+          localStorage.removeItem("soccer_job");
           setStatus("error");
           setErrorMsg(data.message ?? "처리 중 오류 발생");
         } else if (data.progress !== undefined) {
@@ -44,6 +58,7 @@ export default function Home() {
       } catch {
         clearInterval(interval);
         clearInterval(timer);
+        localStorage.removeItem("soccer_job");
         setStatus("error");
         setErrorMsg("상태 확인 실패");
       }
@@ -211,7 +226,7 @@ export default function Home() {
             <div className="p-4 flex justify-between items-center">
               <span className="text-green-400 font-semibold">✅ 분석 완료!</span>
               <div className="flex gap-3">
-                <button onClick={() => { setStatus("idle"); setUrl(""); }}
+                <button onClick={() => { localStorage.removeItem("soccer_job"); setStatus("idle"); setUrl(""); }}
                   className="bg-gray-700 hover:bg-gray-600 rounded-lg px-4 py-2 text-sm transition-colors">
                   새 영상 분석
                 </button>
